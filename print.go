@@ -46,7 +46,7 @@ func printMsg(msg OutMsg, writer io.Writer) {
 
 	if decoration == DecorationFancy {
 		color := (msg.reflexID % numColors) + colorStart
-		if reflexID < 0 {
+		if msg.reflexID < 0 {
 			color = colorRed
 		}
 		fmt.Fprintf(writer, "\x1b[01;%dm%s ", color, tag)
