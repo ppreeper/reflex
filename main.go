@@ -80,6 +80,16 @@ func init() {
 	globalConfig.registerFlags(globalFlags)
 }
 
+func flagWasSet(name string) bool {
+	set := false
+	globalFlags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
 func anyNonGlobalsRegistered() bool {
 	any := false
 	walkFn := func(f *flag.Flag) {
@@ -132,16 +142,6 @@ func main() {
 	if verbose {
 		printGlobals()
 	}
-	switch strings.ToLower(flagDecoration) {
-	case "none":
-		decoration = DecorationNone
-	case "plain":
-		decoration = DecorationPlain
-	case "fancy":
-		decoration = DecorationFancy
-	default:
-		log.Fatalf("Invalid decoration %s. Choices: none, plain, fancy.", flagDecoration)
-	}
 
 	if err := os.Chdir(flagDirectory); err != nil {
 		log.Fatalf("Could not change directory to %s: %v", flagDirectory, err)
@@ -165,6 +165,28 @@ func main() {
 		if len(configs) == 0 {
 			log.Fatal("No configurations found")
 		}
+	}
+
+	// Decoration applies to all output. A value given on the command line
+	// wins over one set in a config file.
+	if !flagWasSet("decoration") {
+		configDecoration, err := DecorationFromConfigs(configs)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		if configDecoration != "" {
+			flagDecoration = configDecoration
+		}
+	}
+	switch strings.ToLower(flagDecoration) {
+	case "none":
+		decoration = DecorationNone
+	case "plain":
+		decoration = DecorationPlain
+	case "fancy":
+		decoration = DecorationFancy
+	default:
+		log.Fatalf("Invalid decoration %s. Choices: none, plain, fancy.", flagDecoration)
 	}
 
 	for _, config := range configs {
