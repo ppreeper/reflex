@@ -27,9 +27,9 @@ type Reflex struct {
 	onlyDirs     bool
 	command      []string
 	subSymbol    string
-	done         chan struct{}
+	done         chan struct{} // closed when the current command exits
 
-	mu      *sync.Mutex // protects killed and running
+	mu      *sync.Mutex // protects killed, running, cmd, tty, and done
 	killed  bool
 	running bool
 	timeout time.Duration
@@ -92,7 +92,6 @@ func NewReflex(c *Config) (*Reflex, error) {
 		onlyDirs:     c.onlyDirs,
 		command:      c.command,
 		subSymbol:    c.subSymbol,
-		done:         make(chan struct{}),
 		timeout:      c.shutdownTimeout,
 		mu:           &sync.Mutex{},
 	}
@@ -198,8 +197,10 @@ func (r *Reflex) runEach(names <-chan string) {
 			infoPrintln(r.id, "Starting service")
 			r.runCommand(name, stdout)
 		} else {
-			r.runCommand(name, stdout)
-			<-r.done
+			done, err := r.runCommand(name, stdout)
+			if err == nil {
+				<-done
+			}
 			r.mu.Lock()
 			r.running = false
 			r.mu.Unlock()
@@ -210,19 +211,41 @@ func (r *Reflex) runEach(names <-chan string) {
 func (r *Reflex) terminate() {
 	r.mu.Lock()
 	r.killed = true
+	cmd := r.cmd
+	tty := r.tty
+	done := r.done
 	r.mu.Unlock()
+
+	defer func() {
+		r.mu.Lock()
+		r.running = false
+		r.mu.Unlock()
+	}()
+
+	if tty == nil && (cmd == nil || cmd.Process == nil) {
+		// The command never started (for example, pty.Start failed), so
+		// there is nothing to kill. In particular, don't wait for a done
+		// channel that will never be closed. See issue #105.
+		return
+	}
+
 	// Write ascii 3 (what you get from ^C) to the controlling pty.
 	// (This won't do anything if the process already died as the write will
 	// simply fail.)
-	r.tty.Write([]byte{3})
+	if tty != nil {
+		_, _ = tty.Write([]byte{3})
+	}
 
 	timer := time.NewTimer(r.timeout)
 	sig := syscall.SIGINT
 	for {
 		select {
-		case <-r.done:
+		case <-done:
 			return
 		case <-timer.C:
+			if cmd == nil || cmd.Process == nil {
+				return
+			}
 			if sig == syscall.SIGINT {
 				infoPrintln(r.id, "Sending SIGINT signal...")
 			} else {
@@ -232,9 +255,9 @@ func (r *Reflex) terminate() {
 			// Instead of killing the process, we want to kill its
 			// whole pgroup in order to clean up any children the
 			// process may have created.
-			if err := syscall.Kill(-1*r.cmd.Process.Pid, sig); err != nil {
+			if err := syscall.Kill(-1*cmd.Process.Pid, sig); err != nil {
 				infoPrintln(r.id, "Error killing:", err)
-				if err.(syscall.Errno) == syscall.ESRCH { // no such process
+				if errors.Is(err, syscall.ESRCH) { // no such process
 					return
 				}
 			}
@@ -257,22 +280,41 @@ func replaceSubSymbol(command []string, subSymbol string, name string) []string 
 var seqCommands = &sync.Mutex{}
 
 // runCommand runs the given Command. All output is passed line-by-line to the
-// stdout channel.
-func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) {
+// stdout channel. It returns a channel that is closed when the command exits,
+// or an error if the command could not be started.
+func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) (<-chan struct{}, error) {
 	command := replaceSubSymbol(r.command, r.subSymbol, name)
 	cmd := exec.Command(command[0], command[1:]...)
-	r.cmd = cmd
 
 	if flagSequential {
 		seqCommands.Lock()
 	}
 
+	// Hold the lock across pty.Start so that terminate cannot observe a
+	// half-initialized command. A failed start must leave the reflex in a
+	// consistent "not running" state: otherwise a later terminate would
+	// dereference a nil Process (issue #105), and a non-service command
+	// would wait forever for a done signal that never comes.
+	r.mu.Lock()
+	r.killed = false
+	r.running = true
+	r.cmd = cmd
 	tty, err := pty.Start(cmd)
 	if err != nil {
+		r.cmd = nil
+		r.tty = nil
+		r.running = false
+		r.mu.Unlock()
+		if flagSequential {
+			seqCommands.Unlock()
+		}
 		infoPrintln(r.id, err)
-		return
+		return nil, err
 	}
+	done := make(chan struct{})
 	r.tty = tty
+	r.done = done
+	r.mu.Unlock()
 
 	// Handle pty size.
 	chResize := make(chan os.Signal, 1)
@@ -301,15 +343,15 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) {
 		// better way to handle it.
 	}()
 
-	r.mu.Lock()
-	r.running = true
-	r.mu.Unlock()
 	go func() {
 		err := cmd.Wait()
 		if !r.Killed() && err != nil {
 			stdout <- OutMsg{r.id, fmt.Sprintf("(error exit: %s)", err)}
 		}
-		r.done <- struct{}{}
+		r.mu.Lock()
+		r.running = false
+		r.mu.Unlock()
+		close(done)
 
 		signal.Stop(chResize)
 		close(chResize)
@@ -318,6 +360,8 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) {
 			seqCommands.Unlock()
 		}
 	}()
+
+	return done, nil
 }
 
 func (r *Reflex) Start(changes <-chan string) {
