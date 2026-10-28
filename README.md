@@ -37,6 +37,8 @@ with the filename of the changed file. (The symbol may be changed with the
 OPTIONS are given below:
       --all=false:
             Include normally ignored files (VCS and editor special files).
+  -m, --chmods=false:
+            Also trigger on chmod-only changes.
   -c, --config="":
             A configuration file that describes how to run reflex
             (or '-' to read the configuration from stdin).
