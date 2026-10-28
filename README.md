@@ -42,6 +42,8 @@ OPTIONS are given below:
             (or '-' to read the configuration from stdin).
   -d, --decoration="plain":
             How to decorate command output. Choices: none, plain, fancy.
+  -D, --directory=".":
+            Change to this directory before watching for changes.
   -g, --glob=[]:
             A shell glob expression to match filenames. (May be repeated.)
   -G, --inverse-glob=[]:
@@ -153,6 +155,11 @@ Here's an example:
     # Restart server when ruby code changes
     -sr '\.rb$' -- \
         ./bin/run_server.sh
+
+Use `--directory` (`-D`) to run reflex from another directory. The change
+happens before the configuration file is read and before watching starts, so
+relative paths in the configuration and in the watched tree are resolved from
+there.
 
 If you want to change the configuration file and have reflex reload it on the
 fly, you can run reflex inside reflex:

@@ -22,6 +22,7 @@ var (
 	flagConf       string
 	flagSequential bool
 	flagDecoration string
+	flagDirectory  string
 	decoration     Decoration
 	verbose        bool
 	globalFlags    = flag.NewFlagSet("", flag.ContinueOnError)
@@ -71,6 +72,8 @@ func init() {
             Don't run multiple commands at the same time.`)
 	globalFlags.StringVarP(&flagDecoration, "decoration", "d", "plain", `
             How to decorate command output. Choices: none, plain, fancy.`)
+	globalFlags.StringVarP(&flagDirectory, "directory", "D", ".", `
+            Change to this directory before watching for changes.`)
 	globalConfig.registerFlags(globalFlags)
 }
 
@@ -78,7 +81,7 @@ func anyNonGlobalsRegistered() bool {
 	any := false
 	walkFn := func(f *flag.Flag) {
 		switch f.Name {
-		case "config", "verbose", "sequential", "decoration":
+		case "config", "verbose", "sequential", "decoration", "directory":
 		default:
 			any = true
 		}
@@ -135,6 +138,10 @@ func main() {
 		decoration = DecorationFancy
 	default:
 		log.Fatalf("Invalid decoration %s. Choices: none, plain, fancy.", flagDecoration)
+	}
+
+	if err := os.Chdir(flagDirectory); err != nil {
+		log.Fatalf("Could not change directory to %s: %v", flagDirectory, err)
 	}
 
 	var configs []*Config
