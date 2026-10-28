@@ -39,6 +39,8 @@ OPTIONS are given below:
             Include normally ignored files (VCS and editor special files).
   -m, --chmods=false:
             Also trigger on chmod-only changes.
+      --clear=false:
+            Clear the screen before running each command.
   -c, --config="":
             A configuration file that describes how to run reflex
             (or '-' to read the configuration from stdin).
@@ -241,6 +243,12 @@ services. For example, a config line
     --name=web -s -- ./bin/server
 
 produces lines tagged `[web]`.
+
+### Clearing the screen
+
+With long-running services the output accumulates in your terminal. Pass
+`--clear` to erase the screen before each command run, so you only see the
+output of the latest run.
 
 ### Ignored files
 

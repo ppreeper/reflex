@@ -25,7 +25,10 @@ type OutMsg struct {
 	reflexID   int
 	reflexName string
 	msg        string
+	clear      bool
 }
+
+const clearScreen = "\x1b[2J\x1b[3J\x1b[H"
 
 func infoPrintln(id int, name string, args ...interface{}) {
 	stdout <- OutMsg{reflexID: id, reflexName: name, msg: strings.TrimSpace(fmt.Sprintln(args...))}
@@ -36,6 +39,13 @@ func infoPrintf(id int, name string, format string, args ...interface{}) {
 }
 
 func printMsg(msg OutMsg, writer io.Writer) {
+	if msg.clear {
+		fmt.Fprint(writer, clearScreen)
+		if msg.msg == "" {
+			return
+		}
+	}
+
 	tag := ""
 	if decoration == DecorationFancy || decoration == DecorationPlain {
 		switch {

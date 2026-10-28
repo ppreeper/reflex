@@ -174,6 +174,7 @@ func TestPrintMsgTags(t *testing.T) {
 		{"numeric", OutMsg{reflexID: 3, msg: "hello"}, "[03] hello\n"},
 		{"named", OutMsg{reflexID: 3, reflexName: "web", msg: "hello"}, "[web] hello\n"},
 		{"info", OutMsg{reflexID: -1, msg: "oops"}, "[info] oops\n"},
+		{"clear", OutMsg{clear: true}, clearScreen},
 	} {
 		var b bytes.Buffer
 		printMsg(tt.msg, &b)

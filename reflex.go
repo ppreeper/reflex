@@ -152,11 +152,11 @@ func (r *Reflex) filterMatching(out chan<- string, in <-chan string) {
 
 // batch receives file notification events and batches them up. It's a bit
 // tricky, but here's what it accomplishes:
-// * When we initially get a message, wait a bit and batch messages before
-//   trying to send anything. This is because the file events come in bursts.
-// * Once it's time to send, don't do it until the out channel is unblocked.
-//   In the meantime, keep batching. When we've sent off all the batched
-//   messages, go back to the beginning.
+//   - When we initially get a message, wait a bit and batch messages before
+//     trying to send anything. This is because the file events come in bursts.
+//   - Once it's time to send, don't do it until the out channel is unblocked.
+//     In the meantime, keep batching. When we've sent off all the batched
+//     messages, go back to the beginning.
 func (r *Reflex) batch(out chan<- string, in <-chan string) {
 
 	const silenceInterval = 300 * time.Millisecond
@@ -320,6 +320,10 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) (<-chan struct{},
 	r.tty = tty
 	r.done = done
 	r.mu.Unlock()
+
+	if flagClear {
+		stdout <- OutMsg{clear: true}
+	}
 
 	// Handle pty size.
 	chResize := make(chan os.Signal, 1)

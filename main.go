@@ -25,6 +25,7 @@ var (
 	flagSequential bool
 	flagDecoration string
 	flagDirectory  string
+	flagClear      bool
 	decoration     Decoration
 	verbose        bool
 	chmods         bool
@@ -73,6 +74,8 @@ func init() {
             Verbose mode: print out more information about what reflex is doing.`)
 	globalFlags.BoolVarP(&chmods, "chmods", "m", false, `
             Also trigger on chmod-only changes.`)
+	globalFlags.BoolVar(&flagClear, "clear", false, `
+            Clear the screen before running each command.`)
 	globalFlags.BoolVarP(&flagSequential, "sequential", "e", false, `
             Don't run multiple commands at the same time.`)
 	globalFlags.StringVarP(&flagDecoration, "decoration", "d", "plain", `
@@ -96,7 +99,7 @@ func anyNonGlobalsRegistered() bool {
 	any := false
 	walkFn := func(f *flag.Flag) {
 		switch f.Name {
-		case "config", "verbose", "sequential", "decoration", "directory", "chmods":
+		case "config", "verbose", "sequential", "decoration", "directory", "chmods", "clear":
 		default:
 			any = true
 		}
