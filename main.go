@@ -16,6 +16,8 @@ import (
 
 const defaultSubSymbol = "{}"
 
+const defaultConfigFile = "reflex.conf"
+
 var (
 	reflexes []*Reflex
 
@@ -148,6 +150,14 @@ func main() {
 	}
 
 	var configs []*Config
+	// Use reflex.conf automatically when reflex is invoked with no command and
+	// no per-command flags, so that running `reflex -r foo make` is unaffected
+	// by a reflex.conf in the directory.
+	if flagConf == "" && globalFlags.NArg() == 0 && !anyNonGlobalsRegistered() {
+		if info, err := os.Stat(defaultConfigFile); err == nil && !info.IsDir() {
+			flagConf = defaultConfigFile
+		}
+	}
 	if flagConf == "" {
 		if flagSequential {
 			log.Fatal("Cannot set --sequential without --config (because you cannot specify multiple commands).")

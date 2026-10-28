@@ -172,6 +172,11 @@ Process-wide settings such as `--decoration` (`-d`) may also be given on a
 config line. A value on the command line takes precedence; using different
 values on different lines is an error.
 
+If a file named `reflex.conf` exists in the working directory, reflex uses it
+automatically when you run `reflex` without a config file, a command, or any
+per-command flags. This means plain `reflex` picks up your config, while
+`reflex -r '\.go$' make` and `reflex -c other.conf` behave as usual.
+
 If you want to change the configuration file and have reflex reload it on the
 fly, you can run reflex inside reflex:
 
