@@ -84,7 +84,7 @@ func TestSequentialUnlockOnFailedStart(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			r.runCommand("", make(chan OutMsg, 4))
+			_, _ = r.runCommand("", make(chan OutMsg, 4))
 		}()
 		select {
 		case <-done:
@@ -123,8 +123,7 @@ func TestRunEachDoesNotHangAfterFailedStart(t *testing.T) {
 func TestKilledResetsBetweenRuns(t *testing.T) {
 	r := newTestReflex("sh", "-c", "sleep 5")
 
-	done, err := r.runCommand("", make(chan OutMsg, 16))
-	if err != nil {
+	if _, err := r.runCommand("", make(chan OutMsg, 16)); err != nil {
 		t.Fatalf("runCommand: %v", err)
 	}
 
@@ -148,7 +147,7 @@ func TestKilledResetsBetweenRuns(t *testing.T) {
 
 	// A new run must reset killed so that failures are reported again.
 	r.command = []string{"sh", "-c", "exit 0"}
-	done, err = r.runCommand("", make(chan OutMsg, 16))
+	done, err := r.runCommand("", make(chan OutMsg, 16))
 	if err != nil {
 		t.Fatalf("second runCommand: %v", err)
 	}

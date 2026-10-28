@@ -39,9 +39,11 @@ func infoPrintf(id int, name string, format string, args ...interface{}) {
 }
 
 func printMsg(msg OutMsg, writer io.Writer) {
+	var b strings.Builder
 	if msg.clear {
-		fmt.Fprint(writer, clearScreen)
+		b.WriteString(clearScreen)
 		if msg.msg == "" {
+			writeLine(writer, b.String())
 			return
 		}
 	}
@@ -63,17 +65,24 @@ func printMsg(msg OutMsg, writer io.Writer) {
 		if msg.reflexID < 0 {
 			color = colorRed
 		}
-		fmt.Fprintf(writer, "\x1b[01;%dm%s ", color, tag)
+		fmt.Fprintf(&b, "\x1b[01;%dm%s ", color, tag)
 	} else if decoration == DecorationPlain {
-		fmt.Fprint(writer, tag+" ")
+		b.WriteString(tag + " ")
 	}
-	fmt.Fprint(writer, msg.msg)
+	b.WriteString(msg.msg)
 	if decoration == DecorationFancy {
-		fmt.Fprintf(writer, "\x1b[m")
+		b.WriteString("\x1b[m")
 	}
 	if !strings.HasSuffix(msg.msg, "\n") {
-		fmt.Fprintln(writer)
+		b.WriteByte('\n')
 	}
+	writeLine(writer, b.String())
+}
+
+// writeLine writes one complete decorated line. A terminal write error has
+// nowhere to be reported, so it is intentionally dropped.
+func writeLine(writer io.Writer, line string) {
+	_, _ = io.WriteString(writer, line)
 }
 
 func printOutput(out <-chan OutMsg, outWriter io.Writer) {

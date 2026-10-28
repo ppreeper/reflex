@@ -170,9 +170,9 @@ happens before the configuration file is read and before watching starts, so
 relative paths in the configuration and in the watched tree are resolved from
 there.
 
-Process-wide settings such as `--decoration` (`-d`) may also be given on a
-config line. A value on the command line takes precedence; using different
-values on different lines is an error.
+The `--decoration` (`-d`) setting may also be given on a config line. A value
+on the command line takes precedence; using different values on different
+lines is an error.
 
 If a file named `reflex.conf` exists in the working directory, reflex uses it
 automatically when you run `reflex` without a config file, a command, or any
@@ -248,7 +248,9 @@ produces lines tagged `[web]`.
 
 With long-running services the output accumulates in your terminal. Pass
 `--clear` to erase the screen before each command run, so you only see the
-output of the latest run.
+output of the latest run. When several reflexes are running, each start clears
+the whole screen, including the other reflexes' output; the flag is most useful
+with a single command.
 
 ### Ignored files
 

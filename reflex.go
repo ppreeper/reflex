@@ -200,7 +200,11 @@ func (r *Reflex) runEach(names <-chan string) {
 				r.terminate()
 			}
 			r.infoPrintln("Starting service")
-			r.runCommand(name, stdout)
+			// A start failure is reported by runCommand; there is no process
+			// to wait for, so move on to the next change.
+			if _, err := r.runCommand(name, stdout); err != nil {
+				continue
+			}
 		} else {
 			done, err := r.runCommand(name, stdout)
 			if err == nil {
@@ -242,6 +246,7 @@ func (r *Reflex) terminate() {
 	}
 
 	timer := time.NewTimer(r.timeout)
+	defer timer.Stop()
 	sig := syscall.SIGINT
 	for {
 		select {
@@ -382,7 +387,11 @@ func (r *Reflex) Start(changes <-chan string) {
 	if r.startService {
 		// Easy hack to kick off the initial start.
 		r.infoPrintln("Starting service")
-		r.runCommand("", stdout)
+		// A start failure is reported by runCommand; there is no process to
+		// track, so there is nothing else to do here.
+		if _, err := r.runCommand("", stdout); err != nil {
+			return
+		}
 	}
 }
 
@@ -394,10 +403,6 @@ func (r *Reflex) Killed() bool {
 
 func (r *Reflex) infoPrintln(args ...interface{}) {
 	infoPrintln(r.id, r.name, args...)
-}
-
-func (r *Reflex) infoPrintf(format string, args ...interface{}) {
-	infoPrintf(r.id, r.name, format, args...)
 }
 
 func (r *Reflex) Running() bool {

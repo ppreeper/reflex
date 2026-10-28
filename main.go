@@ -26,9 +26,9 @@ var (
 	flagDecoration string
 	flagDirectory  string
 	flagClear      bool
+	flagChmods     bool
 	decoration     Decoration
 	verbose        bool
-	chmods         bool
 	globalFlags    = flag.NewFlagSet("", flag.ContinueOnError)
 	globalConfig   = &Config{}
 
@@ -72,7 +72,7 @@ func init() {
             (or '-' to read the configuration from stdin).`)
 	globalFlags.BoolVarP(&verbose, "verbose", "v", false, `
             Verbose mode: print out more information about what reflex is doing.`)
-	globalFlags.BoolVarP(&chmods, "chmods", "m", false, `
+	globalFlags.BoolVarP(&flagChmods, "chmods", "m", false, `
             Also trigger on chmod-only changes.`)
 	globalFlags.BoolVar(&flagClear, "clear", false, `
             Clear the screen before running each command.`)
@@ -85,6 +85,8 @@ func init() {
 	globalConfig.registerFlags(globalFlags)
 }
 
+// flagWasSet reports whether name was given on the command line. The pflag
+// fork this project uses has no FlagSet.Changed, so Visit is the way to ask.
 func flagWasSet(name string) bool {
 	set := false
 	globalFlags.Visit(func(f *flag.Flag) {
@@ -137,6 +139,23 @@ func cleanup(reason string) {
 	os.Exit(0)
 }
 
+// resolveConfigPath decides which config file to read. An explicit --config
+// always wins. Otherwise reflex uses reflex.conf automatically when it was
+// invoked with no command and no per-command flags; this keeps
+// `reflex -r foo make` unaffected by a reflex.conf in the directory.
+func resolveConfigPath(conf string, haveCommand, perCommandFlags bool) string {
+	if conf != "" {
+		return conf
+	}
+	if haveCommand || perCommandFlags {
+		return ""
+	}
+	if info, err := os.Stat(defaultConfigFile); err == nil && !info.IsDir() {
+		return defaultConfigFile
+	}
+	return ""
+}
+
 func main() {
 	log.SetFlags(0)
 	if err := globalFlags.Parse(os.Args[1:]); err != nil {
@@ -148,19 +167,15 @@ func main() {
 		printGlobals()
 	}
 
-	if err := os.Chdir(flagDirectory); err != nil {
-		log.Fatalf("Could not change directory to %s: %v", flagDirectory, err)
-	}
-
-	var configs []*Config
-	// Use reflex.conf automatically when reflex is invoked with no command and
-	// no per-command flags, so that running `reflex -r foo make` is unaffected
-	// by a reflex.conf in the directory.
-	if flagConf == "" && globalFlags.NArg() == 0 && !anyNonGlobalsRegistered() {
-		if info, err := os.Stat(defaultConfigFile); err == nil && !info.IsDir() {
-			flagConf = defaultConfigFile
+	if flagDirectory != "." {
+		if err := os.Chdir(flagDirectory); err != nil {
+			log.Fatalf("Could not change directory to %s: %v", flagDirectory, err)
 		}
 	}
+
+	flagConf = resolveConfigPath(flagConf, globalFlags.NArg() != 0, anyNonGlobalsRegistered())
+
+	var configs []*Config
 	if flagConf == "" {
 		if flagSequential {
 			log.Fatal("Cannot set --sequential without --config (because you cannot specify multiple commands).")
@@ -168,7 +183,7 @@ func main() {
 		configs = []*Config{globalConfig}
 	} else {
 		if anyNonGlobalsRegistered() {
-			log.Fatal("Cannot set other flags along with --config other than --sequential, --verbose, and --decoration.")
+			log.Fatal("Cannot combine --config with per-command flags (such as --regex or --glob); only global flags are allowed.")
 		}
 		var err error
 		configs, err = ReadConfigs(flagConf)
