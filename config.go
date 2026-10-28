@@ -20,11 +20,13 @@ type Config struct {
 	inverseRegexes  []string
 	inverseGlobs    []string
 	subSymbol       string
+	name            string
 	startService    bool
 	shutdownTimeout time.Duration
 	onlyFiles       bool
 	onlyDirs        bool
 	allFiles        bool
+	decoration      string
 }
 
 func (c *Config) registerFlags(f *flag.FlagSet) {
@@ -41,6 +43,8 @@ func (c *Config) registerFlags(f *flag.FlagSet) {
 	f.StringVar(&c.subSymbol, "substitute", defaultSubSymbol, `
             The substitution symbol that is replaced with the filename
             in a command.`)
+	f.StringVar(&c.name, "name", "", `
+            Use this name instead of the numeric id in output tags.`)
 	f.BoolVarP(&c.startService, "start-service", "s", false, `
             Indicates that the command is a long-running process to be
             restarted on matching changes.`)
@@ -52,6 +56,35 @@ func (c *Config) registerFlags(f *flag.FlagSet) {
             Only match directories (not files).`)
 	f.BoolVar(&c.allFiles, "all", false, `
             Include normally ignored files (VCS and editor special files).`)
+}
+
+// registerConfigOnlyFlags registers flags that are only meaningful in a
+// configuration file. Decoration is process-wide, so it is a global flag on
+// the command line; allowing it per config line lets a config file set it
+// once without duplicating the global flag definition.
+func (c *Config) registerConfigOnlyFlags(f *flag.FlagSet) {
+	f.StringVarP(&c.decoration, "decoration", "d", "", `
+            How to decorate command output. Choices: none, plain, fancy.`)
+}
+
+// DecorationFromConfigs returns the decoration requested by the configs. It is
+// an error for configs to ask for different decorations, since decoration
+// applies to all output from the process.
+func DecorationFromConfigs(configs []*Config) (string, error) {
+	decoration := ""
+	for _, c := range configs {
+		if c.decoration == "" {
+			continue
+		}
+		if decoration != "" && !strings.EqualFold(decoration, c.decoration) {
+			return "", fmt.Errorf("conflicting decorations in config: %q and %q",
+				decoration, c.decoration)
+		}
+		if decoration == "" {
+			decoration = c.decoration
+		}
+	}
+	return decoration, nil
 }
 
 // ReadConfigs reads configurations from either a file or, as a special case,
@@ -118,6 +151,7 @@ parseFile:
 		flags := flag.NewFlagSet("", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
 		c.registerFlags(flags)
+		c.registerConfigOnlyFlags(flags)
 		if err := flags.Parse(parts); err != nil {
 			return nil, fmt.Errorf(errorf, err)
 		}

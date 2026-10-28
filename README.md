@@ -37,11 +37,17 @@ with the filename of the changed file. (The symbol may be changed with the
 OPTIONS are given below:
       --all=false:
             Include normally ignored files (VCS and editor special files).
+  -m, --chmods=false:
+            Also trigger on chmod-only changes.
+      --clear=false:
+            Clear the screen before running each command.
   -c, --config="":
             A configuration file that describes how to run reflex
             (or '-' to read the configuration from stdin).
   -d, --decoration="plain":
             How to decorate command output. Choices: none, plain, fancy.
+  -D, --directory=".":
+            Change to this directory before watching for changes.
   -g, --glob=[]:
             A shell glob expression to match filenames. (May be repeated.)
   -G, --inverse-glob=[]:
@@ -50,6 +56,8 @@ OPTIONS are given below:
   -R, --inverse-regex=[]:
             A regular expression to exclude matching filenames.
             (May be repeated.)
+      --name="":
+            Use this name instead of the numeric id in output tags.
       --only-dirs=false:
             Only match directories (not files).
       --only-files=false:
@@ -102,8 +110,11 @@ only files that match all patterns and none of the inverse patterns are
 selected.
 
 The shell glob syntax is described
-[here](http://golang.org/pkg/path/filepath/#Match), while the regular expression
-syntax is described [here](https://code.google.com/p/re2/wiki/Syntax).
+[here](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4#Match), while the
+regular expression syntax is described
+[here](https://code.google.com/p/re2/wiki/Syntax). In addition to the standard
+shell glob syntax, `**` matches any number of path segments, so `-g '**/*.go'`
+matches both `main.go` and `pkg/foo/bar.go`.
 
 The path that is matched against the glob or regular expression does not have a
 leading `./`. For example, if there is a file `./foobar.txt` that changes, then
@@ -153,6 +164,20 @@ Here's an example:
     # Restart server when ruby code changes
     -sr '\.rb$' -- \
         ./bin/run_server.sh
+
+Use `--directory` (`-D`) to run reflex from another directory. The change
+happens before the configuration file is read and before watching starts, so
+relative paths in the configuration and in the watched tree are resolved from
+there.
+
+The `--decoration` (`-d`) setting may also be given on a config line. A value
+on the command line takes precedence; using different values on different
+lines is an error.
+
+If a file named `reflex.conf` exists in the working directory, reflex uses it
+automatically when you run `reflex` without a config file, a command, or any
+per-command flags. This means plain `reflex` picks up your config, while
+`reflex -r '\.go$' make` and `reflex -c other.conf` behave as usual.
 
 If you want to change the configuration file and have reflex reload it on the
 fly, you can run reflex inside reflex:
@@ -210,6 +235,22 @@ like `[00]`, which is simply an id that reflex assigns to each command. You can
 use `--decoration` (`-d`) to change this output: `--decoration=none` will print
 the output as is; `--decoration=fancy` will color each line differently
 depending on which command it is, making it easier to distinguish the output.
+
+If you give a command a name with `--name`, reflex uses that name in the tag
+instead of the numeric id, which is easier to read when you run several
+services. For example, a config line
+
+    --name=web -s -- ./bin/server
+
+produces lines tagged `[web]`.
+
+### Clearing the screen
+
+With long-running services the output accumulates in your terminal. Pass
+`--clear` to erase the screen before each command run, so you only see the
+output of the latest run. When several reflexes are running, each start clears
+the whole screen, including the other reflexes' output; the flag is most useful
+with a single command.
 
 ### Ignored files
 

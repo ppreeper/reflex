@@ -19,6 +19,7 @@ import (
 // A Reflex is a single watch + command to execute.
 type Reflex struct {
 	id           int
+	name         string
 	source       string // Describes what config/line defines this Reflex
 	startService bool
 	backlog      Backlog
@@ -27,9 +28,9 @@ type Reflex struct {
 	onlyDirs     bool
 	command      []string
 	subSymbol    string
-	done         chan struct{}
+	done         chan struct{} // closed when the current command exits
 
-	mu      *sync.Mutex // protects killed and running
+	mu      *sync.Mutex // protects killed, running, cmd, tty, and done
 	killed  bool
 	running bool
 	timeout time.Duration
@@ -84,6 +85,7 @@ func NewReflex(c *Config) (*Reflex, error) {
 
 	reflex := &Reflex{
 		id:           reflexID,
+		name:         c.name,
 		source:       c.source,
 		startService: c.startService,
 		backlog:      backlog,
@@ -92,7 +94,6 @@ func NewReflex(c *Config) (*Reflex, error) {
 		onlyDirs:     c.onlyDirs,
 		command:      c.command,
 		subSymbol:    c.subSymbol,
-		done:         make(chan struct{}),
 		timeout:      c.shutdownTimeout,
 		mu:           &sync.Mutex{},
 	}
@@ -105,6 +106,9 @@ func (r *Reflex) String() string {
 	var buf bytes.Buffer
 	fmt.Fprintln(&buf, "Reflex from", r.source)
 	fmt.Fprintln(&buf, "| ID:", r.id)
+	if r.name != "" {
+		fmt.Fprintln(&buf, "| Name:", r.name)
+	}
 	for _, matcherInfo := range strings.Split(r.matcher.String(), "\n") {
 		fmt.Fprintln(&buf, "|", matcherInfo)
 	}
@@ -148,11 +152,11 @@ func (r *Reflex) filterMatching(out chan<- string, in <-chan string) {
 
 // batch receives file notification events and batches them up. It's a bit
 // tricky, but here's what it accomplishes:
-// * When we initially get a message, wait a bit and batch messages before
-//   trying to send anything. This is because the file events come in bursts.
-// * Once it's time to send, don't do it until the out channel is unblocked.
-//   In the meantime, keep batching. When we've sent off all the batched
-//   messages, go back to the beginning.
+//   - When we initially get a message, wait a bit and batch messages before
+//     trying to send anything. This is because the file events come in bursts.
+//   - Once it's time to send, don't do it until the out channel is unblocked.
+//     In the meantime, keep batching. When we've sent off all the batched
+//     messages, go back to the beginning.
 func (r *Reflex) batch(out chan<- string, in <-chan string) {
 
 	const silenceInterval = 300 * time.Millisecond
@@ -192,14 +196,20 @@ func (r *Reflex) runEach(names <-chan string) {
 	for name := range names {
 		if r.startService {
 			if r.Running() {
-				infoPrintln(r.id, "Killing service")
+				r.infoPrintln("Killing service")
 				r.terminate()
 			}
-			infoPrintln(r.id, "Starting service")
-			r.runCommand(name, stdout)
+			r.infoPrintln("Starting service")
+			// A start failure is reported by runCommand; there is no process
+			// to wait for, so move on to the next change.
+			if _, err := r.runCommand(name, stdout); err != nil {
+				continue
+			}
 		} else {
-			r.runCommand(name, stdout)
-			<-r.done
+			done, err := r.runCommand(name, stdout)
+			if err == nil {
+				<-done
+			}
 			r.mu.Lock()
 			r.running = false
 			r.mu.Unlock()
@@ -210,31 +220,54 @@ func (r *Reflex) runEach(names <-chan string) {
 func (r *Reflex) terminate() {
 	r.mu.Lock()
 	r.killed = true
+	cmd := r.cmd
+	tty := r.tty
+	done := r.done
 	r.mu.Unlock()
+
+	defer func() {
+		r.mu.Lock()
+		r.running = false
+		r.mu.Unlock()
+	}()
+
+	if tty == nil && (cmd == nil || cmd.Process == nil) {
+		// The command never started (for example, pty.Start failed), so
+		// there is nothing to kill. In particular, don't wait for a done
+		// channel that will never be closed. See issue #105.
+		return
+	}
+
 	// Write ascii 3 (what you get from ^C) to the controlling pty.
 	// (This won't do anything if the process already died as the write will
 	// simply fail.)
-	r.tty.Write([]byte{3})
+	if tty != nil {
+		_, _ = tty.Write([]byte{3})
+	}
 
 	timer := time.NewTimer(r.timeout)
+	defer timer.Stop()
 	sig := syscall.SIGINT
 	for {
 		select {
-		case <-r.done:
+		case <-done:
 			return
 		case <-timer.C:
+			if cmd == nil || cmd.Process == nil {
+				return
+			}
 			if sig == syscall.SIGINT {
-				infoPrintln(r.id, "Sending SIGINT signal...")
+				r.infoPrintln("Sending SIGINT signal...")
 			} else {
-				infoPrintln(r.id, "Sending SIGKILL signal...")
+				r.infoPrintln("Sending SIGKILL signal...")
 			}
 
 			// Instead of killing the process, we want to kill its
 			// whole pgroup in order to clean up any children the
 			// process may have created.
-			if err := syscall.Kill(-1*r.cmd.Process.Pid, sig); err != nil {
-				infoPrintln(r.id, "Error killing:", err)
-				if err.(syscall.Errno) == syscall.ESRCH { // no such process
+			if err := syscall.Kill(-1*cmd.Process.Pid, sig); err != nil {
+				r.infoPrintln("Error killing:", err)
+				if errors.Is(err, syscall.ESRCH) { // no such process
 					return
 				}
 			}
@@ -257,22 +290,45 @@ func replaceSubSymbol(command []string, subSymbol string, name string) []string 
 var seqCommands = &sync.Mutex{}
 
 // runCommand runs the given Command. All output is passed line-by-line to the
-// stdout channel.
-func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) {
+// stdout channel. It returns a channel that is closed when the command exits,
+// or an error if the command could not be started.
+func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) (<-chan struct{}, error) {
 	command := replaceSubSymbol(r.command, r.subSymbol, name)
 	cmd := exec.Command(command[0], command[1:]...)
-	r.cmd = cmd
 
 	if flagSequential {
 		seqCommands.Lock()
 	}
 
+	// Hold the lock across pty.Start so that terminate cannot observe a
+	// half-initialized command. A failed start must leave the reflex in a
+	// consistent "not running" state: otherwise a later terminate would
+	// dereference a nil Process (issue #105), and a non-service command
+	// would wait forever for a done signal that never comes.
+	r.mu.Lock()
+	r.killed = false
+	r.running = true
+	r.cmd = cmd
 	tty, err := pty.Start(cmd)
 	if err != nil {
-		infoPrintln(r.id, err)
-		return
+		r.cmd = nil
+		r.tty = nil
+		r.running = false
+		r.mu.Unlock()
+		if flagSequential {
+			seqCommands.Unlock()
+		}
+		r.infoPrintln(err)
+		return nil, err
 	}
+	done := make(chan struct{})
 	r.tty = tty
+	r.done = done
+	r.mu.Unlock()
+
+	if flagClear {
+		stdout <- OutMsg{clear: true}
+	}
 
 	// Handle pty size.
 	chResize := make(chan os.Signal, 1)
@@ -290,10 +346,10 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) {
 		// Allow for lines up to 100 MB.
 		scanner.Buffer(nil, 100e6)
 		for scanner.Scan() {
-			stdout <- OutMsg{r.id, scanner.Text()}
+			stdout <- OutMsg{reflexID: r.id, reflexName: r.name, msg: scanner.Text()}
 		}
 		if err := scanner.Err(); errors.Is(err, bufio.ErrTooLong) {
-			infoPrintln(r.id, "Error: subprocess emitted a line longer than 100 MB")
+			r.infoPrintln("Error: subprocess emitted a line longer than 100 MB")
 		}
 		// Intentionally ignore other scanner errors. Unfortunately,
 		// the pty returns a read error when the child dies naturally,
@@ -301,15 +357,15 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) {
 		// better way to handle it.
 	}()
 
-	r.mu.Lock()
-	r.running = true
-	r.mu.Unlock()
 	go func() {
 		err := cmd.Wait()
 		if !r.Killed() && err != nil {
-			stdout <- OutMsg{r.id, fmt.Sprintf("(error exit: %s)", err)}
+			stdout <- OutMsg{reflexID: r.id, reflexName: r.name, msg: fmt.Sprintf("(error exit: %s)", err)}
 		}
-		r.done <- struct{}{}
+		r.mu.Lock()
+		r.running = false
+		r.mu.Unlock()
+		close(done)
 
 		signal.Stop(chResize)
 		close(chResize)
@@ -318,6 +374,8 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) {
 			seqCommands.Unlock()
 		}
 	}()
+
+	return done, nil
 }
 
 func (r *Reflex) Start(changes <-chan string) {
@@ -328,8 +386,12 @@ func (r *Reflex) Start(changes <-chan string) {
 	go r.runEach(batched)
 	if r.startService {
 		// Easy hack to kick off the initial start.
-		infoPrintln(r.id, "Starting service")
-		r.runCommand("", stdout)
+		r.infoPrintln("Starting service")
+		// A start failure is reported by runCommand; there is no process to
+		// track, so there is nothing else to do here.
+		if _, err := r.runCommand("", stdout); err != nil {
+			return
+		}
 	}
 }
 
@@ -337,6 +399,10 @@ func (r *Reflex) Killed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.killed
+}
+
+func (r *Reflex) infoPrintln(args ...interface{}) {
+	infoPrintln(r.id, r.name, args...)
 }
 
 func (r *Reflex) Running() bool {

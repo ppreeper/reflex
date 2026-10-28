@@ -15,7 +15,7 @@ func TestReadConfigs(t *testing.T) {
 # Some comment here
 -r '^a[0-9]+\.txt$' --only-dirs --substitute='[]' echo []
 
--g '*.go' -s --only-files echo hi
+-g '*.go' -s --only-files --name=web -d fancy echo hi
 
 -r foo -r bar -R baz -g a \
 	-G b -G c echo "hello
@@ -50,6 +50,8 @@ world"
 			startService:    true,
 			shutdownTimeout: 500 * time.Millisecond,
 			onlyFiles:       true,
+			name:            "web",
+			decoration:      "fancy",
 		},
 		{
 			command:         []string{"echo", "hello\nworld"},
@@ -85,5 +87,26 @@ func TestReadConfigsBad(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestDecorationFromConfigs(t *testing.T) {
+	got, err := DecorationFromConfigs([]*Config{
+		{},
+		{decoration: "fancy"},
+		{decoration: "FANCY"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "fancy" {
+		t.Errorf("got %q; want %q", got, "fancy")
+	}
+
+	if _, err := DecorationFromConfigs([]*Config{
+		{decoration: "plain"},
+		{decoration: "fancy"},
+	}); err == nil {
+		t.Error("expected an error for conflicting decorations")
 	}
 }

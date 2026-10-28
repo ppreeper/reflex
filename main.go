@@ -16,12 +16,17 @@ import (
 
 const defaultSubSymbol = "{}"
 
+const defaultConfigFile = "reflex.conf"
+
 var (
 	reflexes []*Reflex
 
 	flagConf       string
 	flagSequential bool
 	flagDecoration string
+	flagDirectory  string
+	flagClear      bool
+	flagChmods     bool
 	decoration     Decoration
 	verbose        bool
 	globalFlags    = flag.NewFlagSet("", flag.ContinueOnError)
@@ -67,18 +72,36 @@ func init() {
             (or '-' to read the configuration from stdin).`)
 	globalFlags.BoolVarP(&verbose, "verbose", "v", false, `
             Verbose mode: print out more information about what reflex is doing.`)
+	globalFlags.BoolVarP(&flagChmods, "chmods", "m", false, `
+            Also trigger on chmod-only changes.`)
+	globalFlags.BoolVar(&flagClear, "clear", false, `
+            Clear the screen before running each command.`)
 	globalFlags.BoolVarP(&flagSequential, "sequential", "e", false, `
             Don't run multiple commands at the same time.`)
 	globalFlags.StringVarP(&flagDecoration, "decoration", "d", "plain", `
             How to decorate command output. Choices: none, plain, fancy.`)
+	globalFlags.StringVarP(&flagDirectory, "directory", "D", ".", `
+            Change to this directory before watching for changes.`)
 	globalConfig.registerFlags(globalFlags)
+}
+
+// flagWasSet reports whether name was given on the command line. The pflag
+// fork this project uses has no FlagSet.Changed, so Visit is the way to ask.
+func flagWasSet(name string) bool {
+	set := false
+	globalFlags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 func anyNonGlobalsRegistered() bool {
 	any := false
 	walkFn := func(f *flag.Flag) {
 		switch f.Name {
-		case "config", "verbose", "sequential", "decoration":
+		case "config", "verbose", "sequential", "decoration", "directory", "chmods", "clear":
 		default:
 			any = true
 		}
@@ -116,6 +139,23 @@ func cleanup(reason string) {
 	os.Exit(0)
 }
 
+// resolveConfigPath decides which config file to read. An explicit --config
+// always wins. Otherwise reflex uses reflex.conf automatically when it was
+// invoked with no command and no per-command flags; this keeps
+// `reflex -r foo make` unaffected by a reflex.conf in the directory.
+func resolveConfigPath(conf string, haveCommand, perCommandFlags bool) string {
+	if conf != "" {
+		return conf
+	}
+	if haveCommand || perCommandFlags {
+		return ""
+	}
+	if info, err := os.Stat(defaultConfigFile); err == nil && !info.IsDir() {
+		return defaultConfigFile
+	}
+	return ""
+}
+
 func main() {
 	log.SetFlags(0)
 	if err := globalFlags.Parse(os.Args[1:]); err != nil {
@@ -126,16 +166,14 @@ func main() {
 	if verbose {
 		printGlobals()
 	}
-	switch strings.ToLower(flagDecoration) {
-	case "none":
-		decoration = DecorationNone
-	case "plain":
-		decoration = DecorationPlain
-	case "fancy":
-		decoration = DecorationFancy
-	default:
-		log.Fatalf("Invalid decoration %s. Choices: none, plain, fancy.", flagDecoration)
+
+	if flagDirectory != "." {
+		if err := os.Chdir(flagDirectory); err != nil {
+			log.Fatalf("Could not change directory to %s: %v", flagDirectory, err)
+		}
 	}
+
+	flagConf = resolveConfigPath(flagConf, globalFlags.NArg() != 0, anyNonGlobalsRegistered())
 
 	var configs []*Config
 	if flagConf == "" {
@@ -145,7 +183,7 @@ func main() {
 		configs = []*Config{globalConfig}
 	} else {
 		if anyNonGlobalsRegistered() {
-			log.Fatal("Cannot set other flags along with --config other than --sequential, --verbose, and --decoration.")
+			log.Fatal("Cannot combine --config with per-command flags (such as --regex or --glob); only global flags are allowed.")
 		}
 		var err error
 		configs, err = ReadConfigs(flagConf)
@@ -155,6 +193,28 @@ func main() {
 		if len(configs) == 0 {
 			log.Fatal("No configurations found")
 		}
+	}
+
+	// Decoration applies to all output. A value given on the command line
+	// wins over one set in a config file.
+	if !flagWasSet("decoration") {
+		configDecoration, err := DecorationFromConfigs(configs)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		if configDecoration != "" {
+			flagDecoration = configDecoration
+		}
+	}
+	switch strings.ToLower(flagDecoration) {
+	case "none":
+		decoration = DecorationNone
+	case "plain":
+		decoration = DecorationPlain
+	case "fancy":
+		decoration = DecorationFancy
+	default:
+		log.Fatalf("Invalid decoration %s. Choices: none, plain, fancy.", flagDecoration)
 	}
 
 	for _, config := range configs {

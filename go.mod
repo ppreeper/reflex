@@ -3,6 +3,7 @@ module github.com/cespare/reflex
 go 1.24.0
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51

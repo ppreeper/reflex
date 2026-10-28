@@ -49,6 +49,31 @@ func TestMatchers(t *testing.T) {
 	}
 }
 
+func TestGlobMatcherDoubleStar(t *testing.T) {
+	for _, tt := range []struct {
+		glob string
+		name string
+		want bool
+	}{
+		{"**/*.go", "main.go", true},
+		{"**/*.go", "pkg/foo/bar.go", true},
+		{"**/*.go", "pkg/foo/bar.txt", false},
+		{"**/*.go", "pkg/foo.go/", false},
+		{"*.go", "pkg/foo.go", false},
+		{"m/**", "m/a/b.go", true},
+		{"foo/**/bar", "foo/bar", true},
+		{"foo/**/bar", "foo/x/y/bar", true},
+		{"foo/**/bar", "foo/x/y/baz", false},
+		{"[", "anything", false},
+	} {
+		m := &globMatcher{glob: tt.glob}
+		if got := m.Match(tt.name); got != tt.want {
+			t.Errorf("glob %q Match(%q): got %t; want %t",
+				tt.glob, tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestExcludePrefix(t *testing.T) {
 	m := newRegexMatcher(regexp.MustCompile("foo"), false)
 	if m.ExcludePrefix("bar") {
