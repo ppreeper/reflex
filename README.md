@@ -108,8 +108,11 @@ only files that match all patterns and none of the inverse patterns are
 selected.
 
 The shell glob syntax is described
-[here](http://golang.org/pkg/path/filepath/#Match), while the regular expression
-syntax is described [here](https://code.google.com/p/re2/wiki/Syntax).
+[here](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4#Match), while the
+regular expression syntax is described
+[here](https://code.google.com/p/re2/wiki/Syntax). In addition to the standard
+shell glob syntax, `**` matches any number of path segments, so `-g '**/*.go'`
+matches both `main.go` and `pkg/foo/bar.go`.
 
 The path that is matched against the glob or regular expression does not have a
 leading `./`. For example, if there is a file `./foobar.txt` that changes, then

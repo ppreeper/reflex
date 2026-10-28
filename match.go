@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"regexp/syntax"
 	"strings"
 	"sync"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // A Matcher decides whether some filename matches its set of patterns.
@@ -67,7 +68,8 @@ type globMatcher struct {
 }
 
 func (m *globMatcher) Match(name string) bool {
-	matches, err := filepath.Match(m.glob, name)
+	// doublestar supports ** for matching across directory separators.
+	matches, err := doublestar.Match(m.glob, name)
 	if err != nil {
 		return false
 	}
