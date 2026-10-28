@@ -54,6 +54,8 @@ OPTIONS are given below:
   -R, --inverse-regex=[]:
             A regular expression to exclude matching filenames.
             (May be repeated.)
+      --name="":
+            Use this name instead of the numeric id in output tags.
       --only-dirs=false:
             Only match directories (not files).
       --only-files=false:
@@ -219,6 +221,14 @@ like `[00]`, which is simply an id that reflex assigns to each command. You can
 use `--decoration` (`-d`) to change this output: `--decoration=none` will print
 the output as is; `--decoration=fancy` will color each line differently
 depending on which command it is, making it easier to distinguish the output.
+
+If you give a command a name with `--name`, reflex uses that name in the tag
+instead of the numeric id, which is easier to read when you run several
+services. For example, a config line
+
+    --name=web -s -- ./bin/server
+
+produces lines tagged `[web]`.
 
 ### Ignored files
 

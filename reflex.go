@@ -19,6 +19,7 @@ import (
 // A Reflex is a single watch + command to execute.
 type Reflex struct {
 	id           int
+	name         string
 	source       string // Describes what config/line defines this Reflex
 	startService bool
 	backlog      Backlog
@@ -84,6 +85,7 @@ func NewReflex(c *Config) (*Reflex, error) {
 
 	reflex := &Reflex{
 		id:           reflexID,
+		name:         c.name,
 		source:       c.source,
 		startService: c.startService,
 		backlog:      backlog,
@@ -104,6 +106,9 @@ func (r *Reflex) String() string {
 	var buf bytes.Buffer
 	fmt.Fprintln(&buf, "Reflex from", r.source)
 	fmt.Fprintln(&buf, "| ID:", r.id)
+	if r.name != "" {
+		fmt.Fprintln(&buf, "| Name:", r.name)
+	}
 	for _, matcherInfo := range strings.Split(r.matcher.String(), "\n") {
 		fmt.Fprintln(&buf, "|", matcherInfo)
 	}
@@ -191,10 +196,10 @@ func (r *Reflex) runEach(names <-chan string) {
 	for name := range names {
 		if r.startService {
 			if r.Running() {
-				infoPrintln(r.id, "Killing service")
+				r.infoPrintln("Killing service")
 				r.terminate()
 			}
-			infoPrintln(r.id, "Starting service")
+			r.infoPrintln("Starting service")
 			r.runCommand(name, stdout)
 		} else {
 			done, err := r.runCommand(name, stdout)
@@ -247,16 +252,16 @@ func (r *Reflex) terminate() {
 				return
 			}
 			if sig == syscall.SIGINT {
-				infoPrintln(r.id, "Sending SIGINT signal...")
+				r.infoPrintln("Sending SIGINT signal...")
 			} else {
-				infoPrintln(r.id, "Sending SIGKILL signal...")
+				r.infoPrintln("Sending SIGKILL signal...")
 			}
 
 			// Instead of killing the process, we want to kill its
 			// whole pgroup in order to clean up any children the
 			// process may have created.
 			if err := syscall.Kill(-1*cmd.Process.Pid, sig); err != nil {
-				infoPrintln(r.id, "Error killing:", err)
+				r.infoPrintln("Error killing:", err)
 				if errors.Is(err, syscall.ESRCH) { // no such process
 					return
 				}
@@ -308,7 +313,7 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) (<-chan struct{},
 		if flagSequential {
 			seqCommands.Unlock()
 		}
-		infoPrintln(r.id, err)
+		r.infoPrintln(err)
 		return nil, err
 	}
 	done := make(chan struct{})
@@ -332,10 +337,10 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) (<-chan struct{},
 		// Allow for lines up to 100 MB.
 		scanner.Buffer(nil, 100e6)
 		for scanner.Scan() {
-			stdout <- OutMsg{r.id, scanner.Text()}
+			stdout <- OutMsg{reflexID: r.id, reflexName: r.name, msg: scanner.Text()}
 		}
 		if err := scanner.Err(); errors.Is(err, bufio.ErrTooLong) {
-			infoPrintln(r.id, "Error: subprocess emitted a line longer than 100 MB")
+			r.infoPrintln("Error: subprocess emitted a line longer than 100 MB")
 		}
 		// Intentionally ignore other scanner errors. Unfortunately,
 		// the pty returns a read error when the child dies naturally,
@@ -346,7 +351,7 @@ func (r *Reflex) runCommand(name string, stdout chan<- OutMsg) (<-chan struct{},
 	go func() {
 		err := cmd.Wait()
 		if !r.Killed() && err != nil {
-			stdout <- OutMsg{r.id, fmt.Sprintf("(error exit: %s)", err)}
+			stdout <- OutMsg{reflexID: r.id, reflexName: r.name, msg: fmt.Sprintf("(error exit: %s)", err)}
 		}
 		r.mu.Lock()
 		r.running = false
@@ -372,7 +377,7 @@ func (r *Reflex) Start(changes <-chan string) {
 	go r.runEach(batched)
 	if r.startService {
 		// Easy hack to kick off the initial start.
-		infoPrintln(r.id, "Starting service")
+		r.infoPrintln("Starting service")
 		r.runCommand("", stdout)
 	}
 }
@@ -381,6 +386,14 @@ func (r *Reflex) Killed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.killed
+}
+
+func (r *Reflex) infoPrintln(args ...interface{}) {
+	infoPrintln(r.id, r.name, args...)
+}
+
+func (r *Reflex) infoPrintf(format string, args ...interface{}) {
+	infoPrintf(r.id, r.name, format, args...)
 }
 
 func (r *Reflex) Running() bool {

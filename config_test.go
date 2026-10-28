@@ -15,7 +15,7 @@ func TestReadConfigs(t *testing.T) {
 # Some comment here
 -r '^a[0-9]+\.txt$' --only-dirs --substitute='[]' echo []
 
--g '*.go' -s --only-files echo hi
+-g '*.go' -s --only-files --name=web echo hi
 
 -r foo -r bar -R baz -g a \
 	-G b -G c echo "hello
@@ -50,6 +50,7 @@ world"
 			startService:    true,
 			shutdownTimeout: 500 * time.Millisecond,
 			onlyFiles:       true,
+			name:            "web",
 		},
 		{
 			command:         []string{"echo", "hello\nworld"},

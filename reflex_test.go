@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"sync"
 	"testing"
@@ -118,6 +119,7 @@ func TestRunEachDoesNotHangAfterFailedStart(t *testing.T) {
 
 // killed is per-process: terminating a service must not suppress error output
 // from later runs of the same reflex.
+
 func TestKilledResetsBetweenRuns(t *testing.T) {
 	r := newTestReflex("sh", "-c", "sleep 5")
 
@@ -156,5 +158,27 @@ func TestKilledResetsBetweenRuns(t *testing.T) {
 	}
 	if r.Running() {
 		t.Fatal("expected running=false after the command exited")
+	}
+}
+
+func TestPrintMsgTags(t *testing.T) {
+	oldDecoration := decoration
+	decoration = DecorationPlain
+	defer func() { decoration = oldDecoration }()
+
+	for _, tt := range []struct {
+		name string
+		msg  OutMsg
+		want string
+	}{
+		{"numeric", OutMsg{reflexID: 3, msg: "hello"}, "[03] hello\n"},
+		{"named", OutMsg{reflexID: 3, reflexName: "web", msg: "hello"}, "[web] hello\n"},
+		{"info", OutMsg{reflexID: -1, msg: "oops"}, "[info] oops\n"},
+	} {
+		var b bytes.Buffer
+		printMsg(tt.msg, &b)
+		if got := b.String(); got != tt.want {
+			t.Errorf("%s: got %q; want %q", tt.name, got, tt.want)
+		}
 	}
 }
